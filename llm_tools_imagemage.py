@@ -129,6 +129,10 @@ def generate_image(
     """
     Generate or edit images using Google Gemini via imagemage.
 
+    This tool uses imagemage, which is powered by Nano Banana Pro (Gemini 3 Pro Image)
+    - Google's state-of-the-art image generation model with excellent text rendering
+    and advanced editing capabilities.
+
     IMPORTANT: When the user asks to modify, edit, or change an existing image,
     ALWAYS use this tool with mode="edit". Gemini is capable of precise edits
     including removing elements, adding elements, changing colors, modifying text,
@@ -316,12 +320,12 @@ def generate_image(
             cmd,
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=90,
         )
     except subprocess.TimeoutExpired:
         _cleanup_temp_files(temp_files)
         return llm.ToolOutput(
-            "Error: Image generation timed out after 60 seconds. "
+            "Error: Image generation timed out after 90 seconds. "
             "Try a simpler prompt or use model='flash' for faster generation."
         )
     except Exception as e:
