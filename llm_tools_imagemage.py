@@ -245,6 +245,12 @@ def generate_image(
     # Track temp files for cleanup
     temp_files = []
 
+    # Validate mode
+    if mode not in ("generate", "edit"):
+        return llm.ToolOutput(
+            f"Error: invalid mode '{mode}'. Must be 'generate' or 'edit'."
+        )
+
     # Build command based on mode
     if mode == "edit":
         if not input_images:
