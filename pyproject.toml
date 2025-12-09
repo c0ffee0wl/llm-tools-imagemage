@@ -1,0 +1,9 @@
+[project]
+name = "llm-tools-imagemage"
+version = "0.1.0"
+description = "LLM tool for Gemini image generation/editing via imagemage"
+requires-python = ">=3.10"
+dependencies = ["llm"]
+
+[project.entry-points.llm]
+imagemage = "llm_tools_imagemage"
