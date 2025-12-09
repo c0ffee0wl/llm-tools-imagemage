@@ -297,8 +297,11 @@ def generate_image(
         cmd = ["imagemage", "generate", prompt]
 
     # Add optional parameters
+    # Use provided output_path, or default to system temp directory
     if output_path:
         cmd.extend(["-o", output_path])
+    else:
+        cmd.extend(["-o", tempfile.gettempdir()])
 
     if aspect_ratio:
         cmd.extend(["-a", aspect_ratio])
