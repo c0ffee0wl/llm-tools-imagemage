@@ -10,6 +10,82 @@ import subprocess
 import shutil
 import os
 import re
+import tempfile
+import urllib.request
+
+
+def _download_url_to_temp(url: str) -> str:
+    """Download URL to a temporary file, return the path.
+
+    Preserves the file extension from the URL for proper MIME type handling.
+    Falls back to .png if no extension can be determined.
+    """
+    # Extract extension from URL (before query params and fragments)
+    url_path = url.split('?')[0].split('#')[0]
+    ext = os.path.splitext(url_path)[1].lower()
+
+    # Validate extension is a known image type, otherwise default to .png
+    if ext not in ('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'):
+        ext = '.png'
+
+    request = urllib.request.Request(
+        url,
+        headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+    )
+    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            # Check content-type header as fallback for extension
+            content_type = response.headers.get('Content-Type', '')
+            if ext == '.png' and content_type:
+                # Map content-type to extension if we defaulted
+                type_to_ext = {
+                    'image/jpeg': '.jpg',
+                    'image/png': '.png',
+                    'image/webp': '.webp',
+                    'image/gif': '.gif',
+                }
+                for mime, detected_ext in type_to_ext.items():
+                    if mime in content_type:
+                        # Need to create a new temp file with correct extension
+                        tmp.close()
+                        os.unlink(tmp.name)
+                        with tempfile.NamedTemporaryFile(suffix=detected_ext, delete=False) as tmp2:
+                            tmp2.write(response.read())
+                            return tmp2.name
+            tmp.write(response.read())
+        return tmp.name
+
+
+def _resolve_image_path(path_or_url: str) -> tuple[str, str | None]:
+    """Resolve an image path or URL to a local file path.
+
+    Supports:
+    - Local paths: /path/to/image.png
+    - HTTP/HTTPS URLs: https://example.com/image.png
+    - File URLs: file:///path/to/image.png
+
+    Returns:
+        (local_path, temp_file_or_none) - temp_file is set if we downloaded
+    """
+    if path_or_url.startswith(('http://', 'https://')):
+        temp_file = _download_url_to_temp(path_or_url)
+        return temp_file, temp_file
+    if path_or_url.startswith('file://'):
+        # Convert file:// URL to local path
+        local_path = path_or_url[7:]  # Remove 'file://'
+        return local_path, None
+    return path_or_url, None
+
+
+def _cleanup_temp_files(temp_files: list[str]) -> None:
+    """Clean up temporary files, ignoring errors."""
+    for tf in temp_files:
+        try:
+            os.unlink(tf)
+        except Exception:
+            pass
 
 
 def _open_image_viewer(image_path: str) -> None:
@@ -46,9 +122,14 @@ def generate_image(
     """
     Generate or edit images using Google Gemini via imagemage.
 
+    IMPORTANT: When the user asks to modify, edit, or change an existing image,
+    ALWAYS use this tool with mode="edit". Gemini is capable of precise edits
+    including removing elements, adding elements, changing colors, modifying text,
+    and redrawing portions of images. Do not refuse edit requests - try them.
+
     MODES:
     - generate: Create image from text description
-    - edit: Modify existing image(s) based on instruction
+    - edit: Modify existing image(s) - can add, remove, change, or redraw elements
 
     MODELS:
     - pro (default): gemini-3-pro-image-preview - High quality, up to 4K, complex reasoning
@@ -83,10 +164,12 @@ def generate_image(
        - Lighting: three-point lighting, rim light, soft box
        - Angles: hero shot, flat lay, 45-degree, eye-level
 
-    6. EDITING INSTRUCTIONS - Be clear about changes:
-       - "Add [element] to the [position] of the image"
-       - "Change the [aspect] to [new value]"
-       - "Remove [element] while preserving [surrounding context]"
+    6. EDITING INSTRUCTIONS - Be specific about what to change:
+       - REMOVE: "Remove the essos.local section from this diagram"
+       - ADD: "Add a cloud icon in the top right corner"
+       - CHANGE: "Change all blue elements to green"
+       - REDRAW: "Redraw this diagram without the bottom section"
+       - TEXT: "Change the title text to say 'New Title'"
 
     USAGE TIPS:
     - Style guidance belongs in the style parameter, not the prompt
@@ -98,7 +181,7 @@ def generate_image(
     Args:
         prompt: Descriptive text for generation, or editing instruction for edit mode
         mode: "generate" for text-to-image, "edit" for modifying existing images
-        input_images: Comma-separated paths for edit mode (first is base image)
+        input_images: Comma-separated paths or URLs for edit mode (first is base image)
         output_path: Output directory for generate, or file path for edit mode
         aspect_ratio: Output aspect ratio (use parameter, not prompt text)
         resolution: 1K, 2K (default), or 4K (pro model only)
@@ -116,11 +199,18 @@ def generate_image(
             aspect_ratio="16:9"
         )
 
-        # Edit an existing image
+        # Edit - add elements
         generate_image(
             "Add dramatic storm clouds gathering in the sky",
             mode="edit",
-            input_images="/path/to/landscape.png"
+            input_images="https://example.com/landscape.png"
+        )
+
+        # Edit - remove elements from diagram
+        generate_image(
+            "Remove the essos.local section from this network diagram",
+            mode="edit",
+            input_images="https://example.com/diagram.png"
         )
 
         # Multi-image composition (best with 2-3 images)
@@ -145,24 +235,45 @@ def generate_image(
             "  # Then add to PATH or: go install"
         )
 
+    # Track temp files for cleanup
+    temp_files = []
+
     # Build command based on mode
     if mode == "edit":
         if not input_images:
             return llm.ToolOutput(
                 "Error: edit mode requires input_images parameter with path(s) to image(s)"
             )
-        images = [p.strip() for p in input_images.split(",")]
+        image_sources = [p.strip() for p in input_images.split(",") if p.strip()]
 
-        # Validate input images exist
-        for img in images:
+        if not image_sources:
+            return llm.ToolOutput(
+                "Error: edit mode requires at least one image path or URL"
+            )
+
+        # Resolve paths/URLs to local files
+        resolved_images = []
+        for img_source in image_sources:
+            try:
+                local_path, temp_file = _resolve_image_path(img_source)
+                if temp_file:
+                    temp_files.append(temp_file)
+                resolved_images.append(local_path)
+            except Exception as e:
+                _cleanup_temp_files(temp_files)
+                return llm.ToolOutput(f"Error downloading image from {img_source}: {e}")
+
+        # Validate resolved images exist
+        for img in resolved_images:
             if not os.path.isfile(img):
+                _cleanup_temp_files(temp_files)
                 return llm.ToolOutput(f"Error: input image not found: {img}")
 
-        base_image = images[0]
+        base_image = resolved_images[0]
         cmd = ["imagemage", "edit", base_image, prompt]
 
         # Add additional images for composition
-        for img in images[1:]:
+        for img in resolved_images[1:]:
             cmd.extend(["-i", img])
     else:
         # generate mode
@@ -195,12 +306,17 @@ def generate_image(
             timeout=300  # 5 minute timeout for image generation
         )
     except subprocess.TimeoutExpired:
+        _cleanup_temp_files(temp_files)
         return llm.ToolOutput(
             "Error: Image generation timed out after 5 minutes. "
             "Try a simpler prompt or use model='flash' for faster generation."
         )
     except Exception as e:
+        _cleanup_temp_files(temp_files)
         return llm.ToolOutput(f"Error running imagemage: {e}")
+
+    # Cleanup temp files after imagemage has processed them
+    _cleanup_temp_files(temp_files)
 
     # Check for errors
     if result.returncode != 0:
