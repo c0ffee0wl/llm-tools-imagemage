@@ -19,14 +19,25 @@ def _download_url_to_temp(url: str) -> str:
 
     Preserves the file extension from the URL for proper MIME type handling.
     Falls back to .png if no extension can be determined.
+    Handles redirects and has a 30-second timeout.
     """
     # Extract extension from URL (before query params and fragments)
     url_path = url.split('?')[0].split('#')[0]
     ext = os.path.splitext(url_path)[1].lower()
 
     # Validate extension is a known image type, otherwise default to .png
-    if ext not in ('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'):
+    valid_extensions = ('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp')
+    if ext not in valid_extensions:
         ext = '.png'
+
+    # MIME type to extension mapping
+    mime_to_ext = {
+        'image/jpeg': '.jpg',
+        'image/png': '.png',
+        'image/webp': '.webp',
+        'image/gif': '.gif',
+        'image/bmp': '.bmp',
+    }
 
     request = urllib.request.Request(
         url,
@@ -34,28 +45,24 @@ def _download_url_to_temp(url: str) -> str:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
     )
-    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            # Check content-type header as fallback for extension
-            content_type = response.headers.get('Content-Type', '')
-            if ext == '.png' and content_type:
-                # Map content-type to extension if we defaulted
-                type_to_ext = {
-                    'image/jpeg': '.jpg',
-                    'image/png': '.png',
-                    'image/webp': '.webp',
-                    'image/gif': '.gif',
-                }
-                for mime, detected_ext in type_to_ext.items():
-                    if mime in content_type:
-                        # Need to create a new temp file with correct extension
-                        tmp.close()
-                        os.unlink(tmp.name)
-                        with tempfile.NamedTemporaryFile(suffix=detected_ext, delete=False) as tmp2:
-                            tmp2.write(response.read())
-                            return tmp2.name
-            tmp.write(response.read())
-        return tmp.name
+
+    # Download with timeout - urllib follows redirects automatically
+    with urllib.request.urlopen(request, timeout=30) as response:
+        # Read all data first
+        data = response.read()
+
+        # Determine extension from content-type if we defaulted to .png
+        content_type = response.headers.get('Content-Type', '')
+        if ext == '.png' and content_type:
+            for mime, detected_ext in mime_to_ext.items():
+                if mime in content_type:
+                    ext = detected_ext
+                    break
+
+        # Write to temp file with correct extension
+        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+            tmp.write(data)
+            return tmp.name
 
 
 def _resolve_image_path(path_or_url: str) -> tuple[str, str | None]:
@@ -303,12 +310,12 @@ def generate_image(
             cmd,
             capture_output=True,
             text=True,
-            timeout=300  # 5 minute timeout for image generation
+            timeout=60,
         )
     except subprocess.TimeoutExpired:
         _cleanup_temp_files(temp_files)
         return llm.ToolOutput(
-            "Error: Image generation timed out after 5 minutes. "
+            "Error: Image generation timed out after 60 seconds. "
             "Try a simpler prompt or use model='flash' for faster generation."
         )
     except Exception as e:
