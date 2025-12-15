@@ -129,28 +129,19 @@ def generate_image(
     """
     Generate or edit images using Google Gemini via imagemage.
 
-    This tool uses imagemage, which is powered by Nano Banana Pro (Gemini 3 Pro Image)
-    - Google's state-of-the-art image generation model with excellent text rendering
-    and advanced editing capabilities.
-
-    IMPORTANT: When the user asks to modify, edit, or change an existing image,
-    ALWAYS use this tool with mode="edit". Gemini is capable of precise edits
-    including removing elements, adding elements, changing colors, modifying text,
-    and redrawing portions of images. Do not refuse edit requests - try them.
-
-    MODES:
+    Modes:
     - generate: Create image from text description
     - edit: Modify existing image(s) - can add, remove, change, or redraw elements
 
-    MODELS:
-    - pro (default): gemini-3-pro-image-preview - High quality, up to 4K, complex reasoning
-    - flash: gemini-2.5-flash-image - Faster and cheaper, good for drafts/iterations
+    Models:
+    - pro (default): High quality, up to 4K, complex reasoning
+    - flash: Faster and cheaper, good for drafts/iterations
 
-    ASPECT RATIOS: 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9
+    Aspect ratios: 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9
 
-    RESOLUTIONS (pro only): 1K, 2K (default), 4K
+    Resolutions (pro only): 1K, 2K (default), 4K
 
-    PROMPTING GUIDE:
+    Prompting guide:
 
     1. DESCRIBE SCENES NARRATIVELY (don't list keywords)
        Bad: "sunset, mountain, lake, reflection"
@@ -182,11 +173,10 @@ def generate_image(
        - REDRAW: "Redraw this diagram without the bottom section"
        - TEXT: "Change the title text to say 'New Title'"
 
-    USAGE TIPS:
+    Tips:
     - Style guidance belongs in the style parameter, not the prompt
     - Always use aspect_ratio parameter - model ignores dimensions in prompt text
     - Multi-image composition works best with 3 or fewer images (max 14 supported)
-    - Specify output_path to control where files are saved
     - All generated images include invisible SynthID watermark
 
     Args:
